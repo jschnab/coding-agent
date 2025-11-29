@@ -1,0 +1,4 @@
+flake8==7.3.0
+google-genai==1.47.0
+ripgrepy==2.2.0
+urllib3==1.26.20
