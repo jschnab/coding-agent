@@ -1,8 +1,10 @@
+import difflib
 import os
 import subprocess
+import sys
 import warnings
 from collections import deque
-from typing import Optional
+from typing import Generator, Optional
 
 from google import genai
 
@@ -42,8 +44,9 @@ file to confirm it contains the intended changes, and check its syntax.
 When running shell commands, do not delete files or directories, and do not
 rename files. In other words, you cannot run `rm`, `rmdir`, and `mv`.
 
-Do not use the shell command `ls -lF` to list files and directories, use the
-given tools.
+DO NOT use the shell for the following, use the given tools instead:
+* List files and directories, for example with the command `ls -lF`.
+* Create or edit files.
 
 When listing directories, be aware of hidden directories.
 """
@@ -231,9 +234,13 @@ def shell(args: str) -> str:
 
 def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
     if old_str == new_str:
-        return "new_str must be different from old_str"
+        raise ValueError("new_str must be different from old_str")
 
     if old_str == "":
+        try:
+            file_edits.track_file(path)
+        except Exception as err:
+            print_red(f"Error tracking file: {str(err)}")
         with open(path, "a") as fi:
             fi.write(new_str)
         return "Success"
@@ -249,6 +256,10 @@ def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
             f"old_str found {count} times in file {path}, must be unique"
         )
 
+    try:
+        file_edits.track_file(path)
+    except Exception as err:
+        print_red(f"Error tracking file: {str(err)}")
     with open(path, "w") as fi:
         fi.write(file_contents.replace(old_str, new_str))
 
@@ -384,13 +395,77 @@ def call_tool(call) -> dict:
         print_magenta(f"Calling {name} with {args}")
     try:
         result = TOOL_MAP[name](**args)
-    except KeyError:
+    except KeyError as err:
+        raise
         error = f"Function '{name}' is not supported"
     except Exception as err:
         error = str(err)
     if DEBUG:
         print_magenta(f"Result: {result}\nError: {error}")
     return {"tool": name, "result": result, "error": error}
+
+
+class FileEdits:
+    def __init__(self):
+        self.files = {}
+
+    @property
+    def has_edits(self):
+        return self.files != {}
+
+    def track_file(self, path: str) -> None:
+        """
+        When a file is edited for the first time:
+        * Make a backup copy of the file (file name is hidden and has a random suffix)
+        * Keep track of the file copy in self.files (use absolute full path):
+            {
+                "<original-file-path>": {
+                    "backup_file_path": "<backup-file-path>"
+                },
+                ...
+            }
+        * If file is created by edit, backup file path is None.
+        """
+        abs_path = os.path.abspath(path)
+        dir_path, file_path = os.path.split(abs_path)
+
+        if os.path.exists(file_path):
+            backup_path = os.path.join(dir_path, f".{file_path}.bak")
+            with open(abs_path) as infile:
+                with open(backup_path, "w") as outfile:
+                    outfile.write(infile.read())
+        else:
+            backup_path = None
+
+        self.files[abs_path] = {"backup_file_path": backup_path}
+
+    def file_diff(self, file_path) -> Generator[str, str, None]:
+        from_file = self.files[file_path]["backup_file_path"]
+
+        with open(file_path) as fi:
+            after = fi.readlines()
+
+        if from_file is not None:
+            with open(from_file) as fi:
+                before = fi.readlines()
+        else:
+            before = []
+
+        return difflib.unified_diff(
+            before,
+            after,
+            fromfile=file_path,
+            tofile=file_path,
+        )
+
+    def print_all_file_diffs(self) -> None:
+        for path in self.files:
+            for line in self.file_diff(path):
+                print(line, end="")
+            print()
+
+
+file_edits = FileEdits()
 
 
 def main() -> None:
@@ -404,9 +479,25 @@ def main() -> None:
         tools=[tools],
     )
     chat = client.chats.create(model=GEMINI_25_PRO, config=config)
+
     function_calls = AgentFunctionCalls()
 
     while True:
+        if file_edits.has_edits:
+            review_edits = None
+            while review_edits is None:
+                print_green("Review file edits? [y/n] ", end="")
+                choice = input().strip().lower()
+                if choice in ("yes", "y"):
+                    review_edits = True
+                elif choice in ("no", "n"):
+                    review_edits = False
+                else:
+                    print_red("Type 'y[es]' or 'n[o]'")
+
+            if review_edits:
+                file_edits.print_all_file_diffs()
+
         print("\033[93mYou: ", end="")
         try:
             user_msg = input()
