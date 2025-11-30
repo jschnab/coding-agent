@@ -37,11 +37,11 @@ When you search the source code, you will do all the following:
   * Search for patterns in file contents.
   * Read files to analyze their contents.
 
-Do not modify files without first describing the changes you intend to make and
+DO NOT modify files without first describing the changes you intend to make and
 obtaining confirmation from me. After you write or edit a file, always read the
 file to confirm it contains the intended changes, and check its syntax.
 
-When running shell commands, do not delete files or directories, and do not
+When running shell commands, DO NOT delete files or directories, and DO NOT
 rename files. In other words, you cannot run `rm`, `rmdir`, and `mv`.
 
 DO NOT use the shell for the following, use the given tools instead:
@@ -49,6 +49,9 @@ DO NOT use the shell for the following, use the given tools instead:
 * Create or edit files.
 
 When listing directories, be aware of hidden directories.
+
+DO NOT install, update, or remove Python libraries without asking for
+permission.
 """
 
 THINKING_DYNAMIC = -1
@@ -484,46 +487,67 @@ def main() -> None:
 
     while True:
         if file_edits.has_edits:
-            review_edits = None
-            while review_edits is None:
-                print_green("Review file edits? [y/n] ", end="")
+            menu_section = None
+            while menu_section == None:
+                print_green(
+                    "Choose next steps:\n"
+                    "1. Prompt agent\n"
+                    "2. Manage file edits"
+                )
                 choice = input().strip().lower()
-                if choice in ("yes", "y"):
-                    review_edits = True
-                elif choice in ("no", "n"):
-                    review_edits = False
+                if choice in ("1", "one"):
+                    menu_section = "prompt_agent"
+                elif choice in ("2", "two"):
+                    menu_section = "manage_file_edits"
                 else:
-                    print_red("Type 'y[es]' or 'n[o]'")
+                    print_red("Type 1 or 2")
+        else:
+            menu_section = "prompt_agent"
 
-            if review_edits:
-                file_edits.print_all_file_diffs()
-
-        print("\033[93mYou: ", end="")
-        try:
-            user_msg = input()
-        except KeyboardInterrupt:
+        if menu_section == "prompt_agent":
+            print("\033[93mYou: ", end="")
+            try:
+                user_msg = input()
+            except KeyboardInterrupt:
+                reset_terminal_color()
+                raise
             reset_terminal_color()
-            raise
-        reset_terminal_color()
-        if user_msg == "":
-            continue
-        response = chat.send_message(user_msg)
-        if DEBUG:
-            print_blue(response)
-        print_agent_response(response)
-        function_calls.extend(agent_function_calls(response))
-
-        while not function_calls.empty:
-            result = call_tool(function_calls.pop())
-            response = chat.send_message(
-                f"Called tool '{result['tool']}'. "
-                f"Result: {result['result']}. "
-                f"Error: {result['error']}."
-            )
+            if user_msg == "":
+                continue
+            response = chat.send_message(user_msg)
             if DEBUG:
                 print_blue(response)
             print_agent_response(response)
             function_calls.extend(agent_function_calls(response))
+
+            while not function_calls.empty:
+                result = call_tool(function_calls.pop())
+                response = chat.send_message(
+                    f"Called tool '{result['tool']}'. "
+                    f"Result: {result['result']}. "
+                    f"Error: {result['error']}."
+                )
+                if DEBUG:
+                    print_blue(response)
+                print_agent_response(response)
+                function_calls.extend(agent_function_calls(response))
+
+        elif menu_section == "manage_file_edits":
+            file_edits_menu_section = None
+            while file_edits_menu_section == None:
+                print_green(
+                    "Choose action:\n"
+                    "1. Review edits\n"
+                    "2. Exit"
+                )
+                choice = input().strip().lower()
+                if choice in ("1", "one"):
+                    file_edits_menu_section = "review"
+                elif choice in ("2", "two", "exit"):
+                    file_edits_menu_section = "exit"
+
+            if file_edits_menu_section == "review":
+                file_edits.print_all_file_diffs()
 
 
 if __name__ == "__main__":
