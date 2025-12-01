@@ -1,9 +1,9 @@
 import difflib
 import os
 import subprocess
-import sys
 import warnings
 from collections import deque
+from enum import Enum
 from typing import Generator, Optional
 
 from google import genai
@@ -307,6 +307,7 @@ class AgentFunctionCalls:
     """
     Used to keep a deduplicated queue of function calls to run for the agent.
     """
+
     def __init__(self) -> None:
         self._deque = deque()
         self._set = set()
@@ -398,8 +399,7 @@ def call_tool(call) -> dict:
         print_magenta(f"Calling {name} with {args}")
     try:
         result = TOOL_MAP[name](**args)
-    except KeyError as err:
-        raise
+    except KeyError:
         error = f"Function '{name}' is not supported"
     except Exception as err:
         error = str(err)
@@ -419,7 +419,8 @@ class FileEdits:
     def track_file(self, path: str) -> None:
         """
         When a file is edited for the first time:
-        * Make a backup copy of the file (file name is hidden and has a random suffix)
+        * Make a backup copy of the file (file name is hidden and has a random
+          suffix)
         * Keep track of the file copy in self.files (use absolute full path):
             {
                 "<original-file-path>": {
@@ -471,24 +472,130 @@ class FileEdits:
 file_edits = FileEdits()
 
 
-def main() -> None:
-    client = genai.Client()
-    tools = genai.types.Tool(function_declarations=FUNCTION_DECLARATIONS)
-    config = genai.types.GenerateContentConfig(
-        system_instruction=AGENT_INSTRUCTIONS,
-        thinking_config=genai.types.ThinkingConfig(
-            thinking_budget=THINKING_DYNAMIC
-        ),
-        tools=[tools],
-    )
-    chat = client.chats.create(model=GEMINI_25_PRO, config=config)
+class Agent:
+    def __init__(self) -> None:
+        self._client = genai.Client()
+        self._tools = genai.types.Tool(
+            function_declarations=FUNCTION_DECLARATIONS
+        )
+        self._config = genai.types.GenerateContentConfig(
+            system_instruction=AGENT_INSTRUCTIONS,
+            thinking_config=genai.types.ThinkingConfig(
+                thinking_budget=THINKING_DYNAMIC
+            ),
+            tools=[self._tools],
+        )
+        self._chat = self._client.chats.create(
+            model=GEMINI_25_PRO,
+            config=self._config,
+        )
+        self._function_calls = AgentFunctionCalls()
 
-    function_calls = AgentFunctionCalls()
+        self._states = Enum(
+            "States",
+            [
+                ("START", 1),
+                ("END", 2),
+                ("MAIN_MENU", 3),
+                ("PROMPT_AGENT", 4),
+                ("USE_TOOL", 5),
+                ("FILE_EDITS_MENU", 6),
+                ("REVIEW_FILE_EDITS", 7),
+            ],
+        )
 
-    while True:
+        self._events = Enum(
+            "Events",
+            [
+                ("KICKOFF", 1),
+                ("PROMPT_AGENT", 2),
+                ("MANAGE_FILE_EDITS", 3),
+                ("NO_FUNCTION_CALLS", 4),
+                ("HAS_FUNCTION_CALLS", 5),
+                ("FINISHED_USING_TOOL", 6),
+                ("REVIEW_FILE_EDITS", 7),
+                ("FINISHED_REVIEWING_FILE_EDITS", 8),
+                ("EXIT_FILE_EDITS_MENU", 9),
+                ("USER_EXITED", 10),
+            ],
+        )
+
+        self._transitions = {
+            self._states.START: {
+                self._events.KICKOFF: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                ),
+            },
+            self._states.MAIN_MENU: {
+                self._events.PROMPT_AGENT: (
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
+                ),
+                self._events.MANAGE_FILE_EDITS: (
+                    self._states.FILE_EDITS_MENU,
+                    self._file_edits_menu,
+                ),
+            },
+            self._states.PROMPT_AGENT: {
+                self._events.PROMPT_AGENT: (
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
+                ),
+                self._events.HAS_FUNCTION_CALLS: (
+                    self._states.USE_TOOL,
+                    self._use_tool,
+                ),
+                self._events.NO_FUNCTION_CALLS: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                ),
+                self._events.USER_EXITED: (self._states.END, None),
+            },
+            self._states.USE_TOOL: {
+                self._events.FINISHED_USING_TOOL: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                ),
+            },
+            self._states.FILE_EDITS_MENU: {
+                self._events.REVIEW_FILE_EDITS: (
+                    self._states.REVIEW_FILE_EDITS,
+                    self._review_file_edits,
+                ),
+                self._events.EXIT_FILE_EDITS_MENU: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                ),
+            },
+            self._states.REVIEW_FILE_EDITS: {
+                self._events.FINISHED_REVIEWING_FILE_EDITS: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                )
+            },
+            self._states.END: {},
+        }
+
+        self._current_state = self._states.START
+        self._current_action = lambda: self._events.KICKOFF
+
+    def start(self) -> None:
+        while self._current_state != self._states.END:
+            event = self._current_action()
+            try:
+                self._current_state, self._current_action = self._transitions[
+                    self._current_state
+                ][event]
+            except Exception as err:
+                print_red(
+                    f"Error {str(err)} with state {self._current_state}, "
+                    f"event {event}"
+                )
+
+    def _main_menu(self) -> Enum:
         if file_edits.has_edits:
-            menu_section = None
-            while menu_section == None:
+            while True:
                 print_green(
                     "Choose next steps:\n"
                     "1. Prompt agent\n"
@@ -496,59 +603,71 @@ def main() -> None:
                 )
                 choice = input().strip().lower()
                 if choice in ("1", "one"):
-                    menu_section = "prompt_agent"
+                    return self._events.PROMPT_AGENT
                 elif choice in ("2", "two"):
-                    menu_section = "manage_file_edits"
+                    return self._events.MANAGE_FILE_EDITS
                 else:
                     print_red("Type 1 or 2")
         else:
-            menu_section = "prompt_agent"
+            return self._events.PROMPT_AGENT
 
-        if menu_section == "prompt_agent":
-            print("\033[93mYou: ", end="")
-            try:
-                user_msg = input()
-            except KeyboardInterrupt:
-                reset_terminal_color()
-                raise
+    def _prompt_agent(self) -> Enum:
+        print("\033[93mYou: ", end="")
+        try:
+            user_msg = input()
+        except KeyboardInterrupt:
             reset_terminal_color()
-            if user_msg == "":
-                continue
-            response = chat.send_message(user_msg)
+            return self._events.USER_EXITED
+
+        reset_terminal_color()
+
+        if user_msg == "":
+            return self._events.PROMPT_AGENT
+
+        response = self._chat.send_message(user_msg)
+        if DEBUG:
+            print_blue(response)
+        print_agent_response(response)
+        self._function_calls.extend(agent_function_calls(response))
+
+        if self._function_calls.empty:
+            return self._events.NO_FUNCTION_CALLS
+        else:
+            return self._events.HAS_FUNCTION_CALLS
+
+    def _use_tool(self) -> Enum:
+        while not self._function_calls.empty:
+            result = call_tool(self._function_calls.pop())
+            response = self._chat.send_message(
+                f"Called tool '{result['tool']}'. "
+                f"Result: {result['result']}. "
+                f"Error: {result['error']}."
+            )
             if DEBUG:
                 print_blue(response)
             print_agent_response(response)
-            function_calls.extend(agent_function_calls(response))
+            self._function_calls.extend(agent_function_calls(response))
 
-            while not function_calls.empty:
-                result = call_tool(function_calls.pop())
-                response = chat.send_message(
-                    f"Called tool '{result['tool']}'. "
-                    f"Result: {result['result']}. "
-                    f"Error: {result['error']}."
-                )
-                if DEBUG:
-                    print_blue(response)
-                print_agent_response(response)
-                function_calls.extend(agent_function_calls(response))
+        return self._events.FINISHED_USING_TOOL
 
-        elif menu_section == "manage_file_edits":
-            file_edits_menu_section = None
-            while file_edits_menu_section == None:
-                print_green(
-                    "Choose action:\n"
-                    "1. Review edits\n"
-                    "2. Exit"
-                )
-                choice = input().strip().lower()
-                if choice in ("1", "one"):
-                    file_edits_menu_section = "review"
-                elif choice in ("2", "two", "exit"):
-                    file_edits_menu_section = "exit"
+    def _file_edits_menu(self) -> Enum:
+        while True:
+            print_green("Choose action:\n" "1. Review edits\n" "2. Exit")
+            choice = input().strip().lower()
+            if choice in ("1", "one"):
+                return self._events.REVIEW_FILE_EDITS
+            elif choice in ("2", "two", "exit"):
+                return self._events.EXIT_FILE_EDITS_MENU
 
-            if file_edits_menu_section == "review":
-                file_edits.print_all_file_diffs()
+    def _review_file_edits(self) -> Enum:
+        file_edits.print_all_file_diffs()
+        return self._events.FINISHED_REVIEWING_FILE_EDITS
+
+
+def main() -> None:
+    agent = Agent()
+    agent.start()
 
 
 if __name__ == "__main__":
-    chat = main()
+    main()
