@@ -469,13 +469,25 @@ class FileEdits:
             tofile=file_path,
         )
 
+    def print_file_diffs(self, path) -> None:
+        for line in self.file_diff(path):
+            print(line, end="")
+        print()
+
     def print_all_file_diffs(self) -> None:
         if not self.has_edits:
             print("There are no file edits")
         for path in self.files:
-            for line in self.file_diff(path):
-                print(line, end="")
-            print()
+            self.print_file_diffs(path)
+
+    def confirm_file(self, path: str) -> None:
+        backup = self.files[path]["backup_file_path"]
+        if backup is not None:
+            if DEBUG:
+                print_magenta(f"Deleting backup file {backup}")
+            os.remove(backup)
+        del self.files[path]
+        print(f"Confirmed edits to {path}")
 
     def confirm_all(self) -> None:
         if not self.has_edits:
@@ -484,13 +496,25 @@ class FileEdits:
         # list of paths to iterate.
         to_process = [path for path in self.files]
         for path in to_process:
-            backup = self.files[path]["backup_file_path"]
-            if backup is not None:
-                if DEBUG:
-                    print_magenta(f"Deleting backup file {backup}")
-                os.remove(backup)
-            del self.files[path]
-            print(f"Confirmed edits to {path}")
+            self.confirm_file(path)
+
+    def revert_file(self, path: str) -> None:
+        backup = self.files[path]["backup_file_path"]
+        if backup is not None:
+            if DEBUG:
+                print_magenta(f"Reverting {path}")
+            with open(backup) as infile:
+                with open(path, "w") as outfile:
+                    outfile.write(infile.read())
+            if DEBUG:
+                print_magenta(f"Deleting backup file {backup}")
+            os.remove(backup)
+        else:
+            if DEBUG:
+                print_magenta(f"Deleting {path}")
+            os.remove(path)
+        del self.files[path]
+        print(f"Reverted edits to {path}")
 
     def revert_all(self) -> None:
         if not self.has_edits:
@@ -499,22 +523,7 @@ class FileEdits:
         # list of paths to iterate.
         to_process = [path for path in self.files]
         for path in to_process:
-            backup = self.files[path]["backup_file_path"]
-            if backup is not None:
-                if DEBUG:
-                    print_magenta(f"Reverting {path}")
-                with open(backup) as infile:
-                    with open(path, "w") as outfile:
-                        outfile.write(infile.read())
-                if DEBUG:
-                    print_magenta(f"Deleting backup file {backup}")
-                os.remove(backup)
-            else:
-                if DEBUG:
-                    print_magenta(f"Deleting {path}")
-                os.remove(path)
-            del self.files[path]
-            print(f"Reverted edits to {path}")
+            self.revert_file(path)
 
 
 file_edits = FileEdits()
@@ -551,6 +560,7 @@ class Agent:
                 ("SHOW_FILE_EDITS", 7),
                 ("CONFIRM_EDITS_ALL", 8),
                 ("REVERT_EDITS_ALL", 9),
+                ("REVIEW_EDITS_FILE_BY_FILE", 10),
             ],
         )
 
@@ -572,6 +582,8 @@ class Agent:
                 ("FINISHED_CONFIRMING_FILE_EDITS", 13),
                 ("FINISHED_REVERTING_FILE_EDITS", 14),
                 ("NO_EDITS", 15),
+                ("REVIEW_EDITS_FILE_BY_FILE", 16),
+                ("GO_TO_FILE_EDITS_MENU", 17),
             ],
         )
 
@@ -626,6 +638,10 @@ class Agent:
                     self._states.REVERT_EDITS_ALL,
                     self._revert_edits_all,
                 ),
+                self._events.REVIEW_EDITS_FILE_BY_FILE: (
+                    self._states.REVIEW_EDITS_FILE_BY_FILE,
+                    self._review_edits_file_by_file,
+                ),
                 self._events.GO_TO_MAIN_MENU: (
                     self._states.MAIN_MENU,
                     self._main_menu,
@@ -649,6 +665,16 @@ class Agent:
             },
             self._states.REVERT_EDITS_ALL: {
                 self._events.FINISHED_REVERTING_FILE_EDITS: (
+                    self._states.FILE_EDITS_MENU,
+                    self._file_edits_menu,
+                ),
+            },
+            self._states.REVIEW_EDITS_FILE_BY_FILE: {
+                self._events.NO_EDITS: (
+                    self._states.MAIN_MENU,
+                    self._main_menu,
+                ),
+                self._events.GO_TO_FILE_EDITS_MENU: (
                     self._states.FILE_EDITS_MENU,
                     self._file_edits_menu,
                 ),
@@ -735,7 +761,8 @@ class Agent:
         while True:
             print_green(
                 "Choose action:\n1. Show edits\n2. Confirm edits (all)\n"
-                "3. Revert edits (all)\n4. Main menu"
+                "3. Revert edits (all)\n4. Review edits (file by file)\n"
+                "5. Main menu"
             )
             choice = input().strip().lower()
             if choice in ("1", "one"):
@@ -745,6 +772,8 @@ class Agent:
             elif choice in ("3", "three"):
                 return self._events.REVERT_EDITS_ALL
             elif choice in ("4", "four"):
+                return self._events.REVIEW_EDITS_FILE_BY_FILE
+            elif choice in ("5", "five"):
                 return self._events.GO_TO_MAIN_MENU
 
     def _show_file_edits(self) -> Enum:
@@ -758,6 +787,44 @@ class Agent:
     def _revert_edits_all(self) -> Enum:
         file_edits.revert_all()
         return self._events.FINISHED_REVERTING_FILE_EDITS
+
+    def _review_edits_file_by_file(self) -> Enum:
+        if not file_edits.has_edits:
+            return self._events.NO_EDITS
+        while True:
+            files = {
+                str(idx): path
+                for idx, path in enumerate(file_edits.files, start=1)
+            }
+            if files == {}:
+                return self._events.NO_EDITS
+            file_list_str = "\n".join(
+                f"{idx}. {path}" for idx, path in files.items()
+            )
+            print_green(
+                f"Choose file:\n{file_list_str}\n"
+                f"{len(file_edits.files) + 1}. File edits menu"
+            )
+            choice = input().strip().lower()
+            if choice == f"{len(file_edits.files) + 1}":
+                return self._events.GO_TO_FILE_EDITS_MENU
+            path = files.get(choice)
+            if path is None:
+                print_red(f"Invalid choice: {choice}")
+                continue
+            file_edits.print_file_diffs(path)
+            while True:
+                print_green("1. Confirm\n2. Revert\n3. Ignore")
+                choice = input().strip().lower()
+                if choice == "1":
+                    file_edits.confirm_file(path)
+                    break
+                elif choice == "2":
+                    file_edits.revert_file(path)
+                    break
+                elif choice == "3":
+                    break
+        return self._events.GO_TO_FILE_EDITS_MENU
 
 
 def main() -> None:
