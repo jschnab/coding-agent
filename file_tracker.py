@@ -103,7 +103,7 @@ class FileTracker:
 
     def print_all_file_diffs(self) -> None:
         if not self.has_edits:
-            print("There are no file edits")
+            print("\nThere are no file edits")
         for path in self._files:
             self.print_file_diffs(path)
 
@@ -114,11 +114,11 @@ class FileTracker:
 
             os.remove(backup)
         del self._files[path]
-        print(f"Confirmed edits to {path}")
+        print(f"\nConfirmed edits to {path}")
 
     def confirm_all(self) -> None:
         if not self.has_edits:
-            print("There are no file edits")
+            print("\nThere are no file edits")
         # Cannot delete from a dictionary while iterating, so make a separate
         # list of paths to iterate.
         to_process = [path for path in self._files]
@@ -138,11 +138,11 @@ class FileTracker:
             logger.info(f"Deleting {path}")
             os.remove(path)
         del self._files[path]
-        print(f"Reverted edits to {path}")
+        print(f"\nReverted edits to {path}")
 
     def revert_all(self) -> None:
         if not self.has_edits:
-            print("There are no file edits")
+            print("\nThere are no file edits")
         # Cannot delete from a dictionary while iterating, so make a separate
         # list of paths to iterate.
         to_process = [path for path in self._files]
