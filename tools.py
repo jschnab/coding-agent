@@ -287,10 +287,10 @@ class ToolManager:
     def confirm_all_file_edits(self) -> None:
         return self._file_tracker.confirm_all()
 
-    def revert_file_edits(self, path: str) -> None:
+    def revert_file_edits(self, path: str) -> str:
         return self._file_tracker.revert_file(path)
 
-    def revert_all_file_edits(self) -> None:
+    def revert_all_file_edits(self) -> str:
         return self._file_tracker.revert_all()
 
     def print_file_diffs(self, path: str) -> None:

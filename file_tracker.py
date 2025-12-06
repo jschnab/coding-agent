@@ -7,7 +7,6 @@ from terminal import (
     print_blue,
     print_green,
     print_red,
-    reset_terminal_color,
 )
 
 logger = get_logger(__name__)
@@ -125,7 +124,7 @@ class FileTracker:
         for path in to_process:
             self.confirm_file(path)
 
-    def revert_file(self, path: str) -> None:
+    def revert_file(self, path: str) -> str:
         backup = self._files[path]["backup_file_path"]
         if backup is not None:
             logger.info(f"Reverting {path}")
@@ -138,9 +137,11 @@ class FileTracker:
             logger.info(f"Deleting {path}")
             os.remove(path)
         del self._files[path]
-        print(f"\nReverted edits to {path}")
+        msg = f"Reverted edits to {path}"
+        print("\n" + msg)
+        return msg
 
-    def revert_all(self) -> None:
+    def revert_all(self) -> str:
         if not self.has_edits:
             print("\nThere are no file edits")
         # Cannot delete from a dictionary while iterating, so make a separate
@@ -148,3 +149,4 @@ class FileTracker:
         to_process = [path for path in self._files]
         for path in to_process:
             self.revert_file(path)
+        return f"Reverted edits to {', '.join(to_process)}"
