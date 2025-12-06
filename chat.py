@@ -1,17 +1,19 @@
 import difflib
+import logging
 import os
 import subprocess
-import warnings
 from collections import deque
 from enum import Enum
 from typing import Generator, Optional
 
 from google import genai
 
-warnings.filterwarnings("ignore")
-
-DEBUG = True
-
+logging.basicConfig(
+    filename="log",
+    filemode="a",
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s: %(message)s",
+)
 
 GEMINI_3 = "gemini-3-pro-preview"
 GEMINI_25_PRO = "gemini-2.5-pro"
@@ -47,14 +49,6 @@ When listing directories, be aware of hidden directories.
 
 DO NOT install, update, or remove Python libraries without asking for
 permission.
-"""
-
-OTHER_INSTRUCTIONS = """
-You have access to several tools to help you in this task. You will suggest
-wich tool should be used, then I will execute the tool with the parameters you
-provide and return the tool result to you. You will update your response based
-on tool results. When I return tool results to you, describe results and
-wait for further input from me.
 """
 
 THINKING_DYNAMIC = -1
@@ -247,10 +241,6 @@ def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
         raise ValueError("new_str must be different from old_str")
 
     if old_str == "":
-        try:
-            file_edits.track_file(path)
-        except Exception as err:
-            print_red(f"Error tracking file: {str(err)}")
         with open(path, "a") as fi:
             fi.write(new_str)
         return "Success"
@@ -266,10 +256,6 @@ def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
             f"old_str found {count} times in file {path}, must be unique"
         )
 
-    try:
-        file_edits.track_file(path)
-    except Exception as err:
-        print_red(f"Error tracking file: {str(err)}")
     with open(path, "w") as fi:
         fi.write(file_contents.replace(old_str, new_str))
 
@@ -295,19 +281,6 @@ def code_search(
     args.append(path or ".")
 
     return shell(" ".join(args))
-
-
-def print_agent_response(
-    response: genai.types.GenerateContentResponse,
-) -> None:
-    printed_id = False
-    for candidate in response.candidates:
-        for part in candidate.content.parts:
-            if part.text is not None:
-                if not printed_id:
-                    print_green("Agent: ", end="")
-                    printed_id = True
-                print_green(part.text)
 
 
 class AgentFunctionCalls:
@@ -397,24 +370,6 @@ TOOL_MAP = {
 }
 
 
-def call_tool(call) -> dict:
-    name = call.name
-    args = call.args
-    result = None
-    error = None
-    if DEBUG:
-        print_magenta(f"Calling {name} with {args}")
-    try:
-        result = TOOL_MAP[name](**args)
-    except KeyError:
-        error = f"Function '{name}' is not supported"
-    except Exception as err:
-        error = str(err)
-    if DEBUG:
-        print_magenta(f"Result: {result}\nError: {error}")
-    return {"tool": name, "result": result, "error": error}
-
-
 class FileEdits:
     def __init__(self):
         self.files = {}
@@ -438,9 +393,14 @@ class FileEdits:
         * If file is created by edit, backup file path is None.
         """
         abs_path = os.path.abspath(path)
+
+        # File already tracked, we're done.
+        if abs_path in self.files:
+            return
+
         dir_path, file_path = os.path.split(abs_path)
 
-        if os.path.exists(file_path):
+        if os.path.exists(abs_path):
             backup_path = os.path.join(dir_path, f".{file_path}.bak")
             with open(abs_path) as infile:
                 with open(backup_path, "w") as outfile:
@@ -470,9 +430,26 @@ class FileEdits:
         )
 
     def print_file_diffs(self, path) -> None:
-        for line in self.file_diff(path):
-            print(line, end="")
         print()
+        for idx, line in enumerate(self.file_diff(path)):
+            if line[-1] != "\n":
+                line += "\n"
+            if idx >= 2:
+                if line[0] == "+":
+                    print_green(line, end="")
+                elif line[0] == "-":
+                    print_red(line, end="")
+                elif line.startswith("@@") and line.endswith("@@\n"):
+                    print_blue(line, end="")
+                else:
+                    print(line, end="")
+            else:
+                print(line, end="")
+            reset_terminal_color()
+
+        # Only one blank line before next block of text.
+        if not line.endswith("\n"):
+            print()
 
     def print_all_file_diffs(self) -> None:
         if not self.has_edits:
@@ -483,8 +460,7 @@ class FileEdits:
     def confirm_file(self, path: str) -> None:
         backup = self.files[path]["backup_file_path"]
         if backup is not None:
-            if DEBUG:
-                print_magenta(f"Deleting backup file {backup}")
+            logging.debug(f"Deleting backup file {backup}")
             os.remove(backup)
         del self.files[path]
         print(f"Confirmed edits to {path}")
@@ -501,17 +477,14 @@ class FileEdits:
     def revert_file(self, path: str) -> None:
         backup = self.files[path]["backup_file_path"]
         if backup is not None:
-            if DEBUG:
-                print_magenta(f"Reverting {path}")
+            logging.debug(f"Reverting {path}")
             with open(backup) as infile:
                 with open(path, "w") as outfile:
                     outfile.write(infile.read())
-            if DEBUG:
-                print_magenta(f"Deleting backup file {backup}")
+            logging.debug(f"Deleting backup file {backup}")
             os.remove(backup)
         else:
-            if DEBUG:
-                print_magenta(f"Deleting {path}")
+            logging.debug(f"Deleting {path}")
             os.remove(path)
         del self.files[path]
         print(f"Reverted edits to {path}")
@@ -685,6 +658,19 @@ class Agent:
         self._current_state = self._states.START
         self._current_action = lambda: self._events.KICKOFF
 
+    def print_agent_response(
+        self,
+        response: genai.types.GenerateContentResponse,
+    ) -> None:
+        printed_id = False
+        for candidate in response.candidates:
+            for part in candidate.content.parts:
+                if part.text is not None:
+                    if not printed_id:
+                        print_blue("Agent: ", end="")
+                        printed_id = True
+                    print_blue(part.text)
+
     def start(self) -> None:
         while self._current_state != self._states.END:
             event = self._current_action()
@@ -693,16 +679,39 @@ class Agent:
                     self._current_state
                 ][event]
             except Exception as err:
-                print_red(
+                logging.error(
                     f"Error {str(err)} with state {self._current_state}, "
                     f"event {event}"
                 )
+                raise
+
+    def call_tool(self, call) -> dict:
+        name = call.name
+        args = call.args
+        result = None
+        error = None
+        logging.debug(f"Calling {name} with {args}")
+        try:
+            if name == "edit_file":
+                path = args["path"]
+                try:
+                    file_edits.track_file(path)
+                except Exception as err:
+                    logging.error(f"Error tracking file {path}: {str(err)}")
+                    raise
+            result = TOOL_MAP[name](**args)
+        except KeyError:
+            error = f"Function '{name}' is not supported"
+        except Exception as err:
+            error = str(err)
+        logging.debug(f"Result: {result}\nError: {error}")
+        return {"tool": name, "result": result, "error": error}
 
     def _main_menu(self) -> Enum:
         if file_edits.has_edits:
             while True:
-                print_green(
-                    "Choose next steps:\n"
+                print(
+                    "\nChoose next steps:\n"
                     "1. Prompt agent\n"
                     "2. Manage file edits"
                 )
@@ -717,9 +726,10 @@ class Agent:
             return self._events.PROMPT_AGENT
 
     def _prompt_agent(self) -> Enum:
-        print("\033[93mYou: ", end="")
+        print("\n\033[93mYou: ", end="")
         try:
             user_msg = input()
+            print()
         except KeyboardInterrupt:
             reset_terminal_color()
             return self._events.USER_EXITED
@@ -730,9 +740,8 @@ class Agent:
             return self._events.PROMPT_AGENT
 
         response = self._chat.send_message(user_msg)
-        if DEBUG:
-            print_blue(response)
-        print_agent_response(response)
+        logging.debug(f"API response: {response}")
+        self.print_agent_response(response)
         self._function_calls.extend(agent_function_calls(response))
 
         if self._function_calls.empty:
@@ -742,15 +751,14 @@ class Agent:
 
     def _use_tool(self) -> Enum:
         while not self._function_calls.empty:
-            result = call_tool(self._function_calls.pop())
+            result = self.call_tool(self._function_calls.pop())
             response = self._chat.send_message(
                 f"Called tool '{result['tool']}'. "
                 f"Result: {result['result']}. "
                 f"Error: {result['error']}."
             )
-            if DEBUG:
-                print_blue(response)
-            print_agent_response(response)
+            logging.debug(f"API response: {response}")
+            self.print_agent_response(response)
             self._function_calls.extend(agent_function_calls(response))
 
         return self._events.FINISHED_USING_TOOL
@@ -759,8 +767,8 @@ class Agent:
         if not file_edits.has_edits:
             return self._events.NO_EDITS
         while True:
-            print_green(
-                "Choose action:\n1. Show edits\n2. Confirm edits (all)\n"
+            print(
+                "\nChoose action:\n1. Show edits\n2. Confirm edits (all)\n"
                 "3. Revert edits (all)\n4. Review edits (file by file)\n"
                 "5. Main menu"
             )
@@ -801,8 +809,8 @@ class Agent:
             file_list_str = "\n".join(
                 f"{idx}. {path}" for idx, path in files.items()
             )
-            print_green(
-                f"Choose file:\n{file_list_str}\n"
+            print(
+                f"\nChoose file:\n{file_list_str}\n"
                 f"{len(file_edits.files) + 1}. File edits menu"
             )
             choice = input().strip().lower()
@@ -814,7 +822,7 @@ class Agent:
                 continue
             file_edits.print_file_diffs(path)
             while True:
-                print_green("1. Confirm\n2. Revert\n3. Ignore")
+                print("\n1. Confirm\n2. Revert\n3. Ignore")
                 choice = input().strip().lower()
                 if choice == "1":
                     file_edits.confirm_file(path)
