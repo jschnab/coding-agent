@@ -3,14 +3,13 @@ from enum import Enum
 
 from google import genai
 
-from file_tracker import FileTracker
 from log import get_logger
 from terminal import (
     print_blue,
     print_red,
     reset_terminal_color,
 )
-from tools import call_tool, get_tool_definitions
+from tools import ToolManager
 
 logger = get_logger(__name__)
 
@@ -95,22 +94,23 @@ class FunctionCallsQueue:
 class GeminiAgent:
     def __init__(self) -> None:
         self._client = genai.Client()
-        self._tools = genai.types.Tool(
-            function_declarations=get_tool_definitions()
-        )
+        self._tools = ToolManager()
         self._config = genai.types.GenerateContentConfig(
             system_instruction=AGENT_INSTRUCTIONS,
             thinking_config=genai.types.ThinkingConfig(
                 thinking_budget=THINKING_DYNAMIC
             ),
-            tools=[self._tools],
+            tools=[
+                genai.types.Tool(
+                    function_declarations=self._tools.get_tool_definitions()
+                ),
+            ],
         )
         self._chat = self._client.chats.create(
             model=GEMINI_25_PRO,
             config=self._config,
         )
         self._calls_queue = FunctionCallsQueue()
-        self._file_tracker = FileTracker()
 
         self._states = Enum(
             "States",
@@ -289,30 +289,8 @@ class GeminiAgent:
                 )
                 raise
 
-    def call_tool(self, call) -> dict:
-        name = call.name
-        args = call.args
-        result = None
-        error = None
-        logger.info(f"Calling {name} with {args}")
-        try:
-            if name == "edit_file":
-                path = args["path"]
-                try:
-                    self._file_tracker.track_file(path)
-                except Exception as err:
-                    logger.error(f"Error tracking file {path}: {str(err)}")
-                    raise
-            result = call_tool(name, args)
-        except KeyError:
-            error = f"Function '{name}' is not supported"
-        except Exception as err:
-            error = str(err)
-        logger.info(f"Result: {result}\nError: {error}")
-        return {"tool": name, "result": result, "error": error}
-
     def _main_menu(self) -> Enum:
-        if self._file_tracker.has_edits:
+        if self._tools.files_have_edits:
             while True:
                 print(
                     "\nChoose next steps:\n"
@@ -355,7 +333,8 @@ class GeminiAgent:
 
     def _use_tool(self) -> Enum:
         while not self._calls_queue.empty:
-            result = self.call_tool(self._calls_queue.pop())
+            call = self._calls_queue.pop()
+            result = self._tools.call_tool(call.name, call.args)
             response = self._chat.send_message(
                 f"Called tool '{result['tool']}'. "
                 f"Result: {result['result']}. "
@@ -368,7 +347,7 @@ class GeminiAgent:
         return self._events.FINISHED_USING_TOOL
 
     def _file_edits_menu(self) -> Enum:
-        if not self._file_tracker.has_edits:
+        if not self._tools.files_have_edits:
             return self._events.NO_EDITS
         while True:
             print(
@@ -389,33 +368,31 @@ class GeminiAgent:
                 return self._events.GO_TO_MAIN_MENU
 
     def _show_file_edits(self) -> Enum:
-        self._file_tracker.print_all_file_diffs()
+        self._tools.print_all_file_diffs()
         return self._events.FINISHED_SHOWING_FILE_EDITS
 
     def _confirm_edits_all(self) -> Enum:
-        self._file_tracker.confirm_all()
+        self._tools.confirm_all_file_edits()
         return self._events.FINISHED_CONFIRMING_FILE_EDITS
 
     def _revert_edits_all(self) -> Enum:
-        self._file_tracker.revert_all()
+        self._tools.revert_all_file_edits()
         return self._events.FINISHED_REVERTING_FILE_EDITS
 
     def _review_edits_file_by_file(self) -> Enum:
-        if not self._file_tracker.has_edits:
+        if not self._tools.files_have_edits:
             return self._events.NO_EDITS
         while True:
             files = {
                 str(idx): path
-                for idx, path in enumerate(
-                    self._file_tracker.tracked_files, start=1
-                )
+                for idx, path in enumerate(self._tools.tracked_files, start=1)
             }
             if files == {}:
                 return self._events.NO_EDITS
             file_list_str = "\n".join(
                 f"{idx}. {path}" for idx, path in files.items()
             )
-            num_files = len(self._file_tracker.tracked_files)
+            num_files = len(self._tools.tracked_files)
             print(
                 f"\nChoose file:\n{file_list_str}\n"
                 f"{num_files + 1}. File edits menu"
@@ -427,15 +404,15 @@ class GeminiAgent:
             if path is None:
                 print_red(f"Invalid choice: {choice}")
                 continue
-            self._file_tracker.print_file_diffs(path)
+            self._tools.print_file_diffs(path)
             while True:
                 print("\n1. Confirm\n2. Revert\n3. Ignore")
                 choice = input().strip().lower()
                 if choice == "1":
-                    self._file_tracker.confirm_file(path)
+                    self._tools.confirm_file_edits(path)
                     break
                 elif choice == "2":
-                    self._file_tracker.revert_file(path)
+                    self._tools.revert_file_edits(path)
                     break
                 elif choice == "3":
                     break

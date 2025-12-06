@@ -1,6 +1,11 @@
 import os
 import subprocess
-from typing import Any, Optional
+from typing import Optional
+
+from file_tracker import FileTracker
+from log import get_logger
+
+logger = get_logger(__name__)
 
 FUNCTION_DECLARATIONS = [
     {
@@ -230,19 +235,66 @@ def code_search(
     return shell(" ".join(args))
 
 
-TOOL_MAP = {
-    "read_text_file": read_text_file,
-    "list_files": list_files,
-    "list_directories": list_directories,
-    "shell": shell,
-    "edit_file": edit_file,
-    "code_search": code_search,
-}
+class ToolManager:
+    def __init__(self) -> None:
+        self._tool_map = {
+            "read_text_file": read_text_file,
+            "list_files": list_files,
+            "list_directories": list_directories,
+            "shell": shell,
+            "edit_file": edit_file,
+            "code_search": code_search,
+        }
+        self._function_declarations = FUNCTION_DECLARATIONS
+        self._file_tracker = FileTracker()
 
+    def call_tool(self, name: str, args: dict) -> dict:
+        result = None
+        error = None
+        logger.info(f"Calling {name} with {args}")
+        try:
+            if name == "edit_file":
+                path = args["path"]
+                try:
+                    self._file_tracker.track_file(path)
+                except Exception as err:
+                    logger.error(f"Error tracking file {path}: {str(err)}")
+                    raise
+            result = self._tool_map[name](**args)
+        except KeyError:
+            error = f"Function '{name}' is not supported"
+        except Exception as err:
+            error = str(err)
+        logger.info(f"Result: {result}\nError: {error}")
+        return {"tool": name, "result": result, "error": error}
 
-def call_tool(name: str, args: dict) -> Any:
-    return TOOL_MAP[name](**args)
+        return self._tool_map[name](**args)
 
+    def get_tool_definitions(self) -> dict:
+        return self._function_declarations
 
-def get_tool_definitions() -> dict:
-    return FUNCTION_DECLARATIONS
+    @property
+    def tracked_files(self) -> list[str]:
+        return self._file_tracker.tracked_files
+
+    @property
+    def files_have_edits(self) -> bool:
+        return self._file_tracker.has_edits
+
+    def confirm_file_edits(self, path: str) -> None:
+        return self._file_tracker.confirm_file(path)
+
+    def confirm_all_file_edits(self) -> None:
+        return self._file_tracker.confirm_all()
+
+    def revert_file_edits(self, path: str) -> None:
+        return self._file_tracker.revert_file(path)
+
+    def revert_all_file_edits(self) -> None:
+        return self._file_tracker.revert_all()
+
+    def print_file_diffs(self, path: str) -> None:
+        return self._file_tracker.print_file_diffs(path)
+
+    def print_all_file_diffs(self) -> None:
+        return self._file_tracker.print_all_file_diffs()
