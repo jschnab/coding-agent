@@ -326,19 +326,28 @@ class GeminiAgent:
             return self._events.PROMPT_AGENT
 
     def _prompt_agent(self) -> Enum:
-        print("\n\033[93mYou: ", end="")
-        try:
-            user_msg = input()
-            print()
-        except KeyboardInterrupt:
+        print("\n\033[93mYou (enter empty line to finish): ", end="")
+        input_lines = []
+        for _ in range(100):
+            try:
+                line = input()
+                if line != "":
+                    input_lines.append(line)
+                else:
+                    break
+            except KeyboardInterrupt:
+                reset_terminal_color()
+                return self._events.USER_EXITED
+        else:
             reset_terminal_color()
-            return self._events.USER_EXITED
+            print("\nMax input size reached (100 lines)")
 
-        reset_terminal_color()
+        print()
 
-        if user_msg == "":
+        if input_lines == []:
             return self._events.PROMPT_AGENT
 
+        user_msg = "\n".join(input_lines)
         response = self.send_message(f"User message: {user_msg}")
         logger.info(f"API response: {response}")
         self.print_agent_response(response)
