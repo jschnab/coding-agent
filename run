@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-HERE=$(dirname "$0")
-
-PYTHON=${HERE}/.venv/bin/python3
-
-${PYTHON} ${HERE}/chat.py "$@"

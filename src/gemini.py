@@ -4,13 +4,13 @@ from typing import Any
 
 from google import genai
 
-from log import get_logger
-from terminal import (
+from .log import get_logger
+from .terminal import (
     print_blue,
     print_red,
     reset_terminal_color,
 )
-from tools import ToolManager
+from .tools import ToolManager
 
 logger = get_logger(__name__)
 
