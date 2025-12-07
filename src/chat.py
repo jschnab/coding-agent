@@ -1,4 +1,4 @@
-from gemini import GeminiAgent
+from .gemini import GeminiAgent
 
 
 def main() -> None:

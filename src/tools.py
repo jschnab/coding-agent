@@ -2,8 +2,8 @@ import os
 import subprocess
 from typing import Optional
 
-from file_tracker import FileTracker
-from log import get_logger
+from .file_tracker import FileTracker
+from .log import get_logger
 
 logger = get_logger(__name__)
 

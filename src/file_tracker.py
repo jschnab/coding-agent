@@ -2,8 +2,8 @@ import difflib
 import os
 from typing import Generator
 
-from log import get_logger
-from terminal import (
+from .log import get_logger
+from .terminal import (
     print_blue,
     print_green,
     print_red,
