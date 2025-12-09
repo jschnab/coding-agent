@@ -326,7 +326,7 @@ class GeminiAgent:
             return self._events.PROMPT_AGENT
 
     def _prompt_agent(self) -> Enum:
-        print("\n\033[93mYou (enter empty line to finish): ", end="")
+        print("\n\033[93mYou (press <Enter> twice to finish): ", end="")
         input_lines = []
         for _ in range(100):
             try:
