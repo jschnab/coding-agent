@@ -1,9 +1,11 @@
 import asyncio
 
+from .art import LOGO
 from .gemini import GeminiAgent
 
 
 def main() -> None:
+    print(LOGO)
     asyncio.run(start_agent())
 
 
