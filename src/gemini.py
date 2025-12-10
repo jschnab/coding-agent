@@ -287,7 +287,10 @@ class GeminiAgent:
                             print_blue("Agent: ", end="")
                             printed_id = True
                         print_blue(part.text)
-        print()
+
+        # Add a blank line of the agent responded
+        if printed_id:
+            print()
 
     @spin("Processing request")
     async def send_message(self, msg: str) -> Any:
