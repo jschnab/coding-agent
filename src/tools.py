@@ -4,6 +4,7 @@ from typing import Optional
 
 from .file_tracker import FileTracker
 from .log import get_logger
+from .spinner import spin_context
 
 logger = get_logger(__name__)
 
@@ -157,38 +158,49 @@ FUNCTION_DECLARATIONS = [
 
 
 def read_text_file(path: str) -> str:
-    with open(path) as fi:
-        return fi.read()
+    with spin_context(f"Reading {path}"):
+        with open(path) as fi:
+            return fi.read()
 
 
 def list_files(dirpath: str = ".") -> list[str]:
-    dirpath = dirpath or "."
-    return [
-        path
-        for path in os.listdir(dirpath)
-        if os.path.isfile(os.path.join(dirpath, path))
-    ]
+    dirpath = os.path.realpath(dirpath or ".")
+    with spin_context(f"Listing files in {dirpath}"):
+        return [
+            path
+            for path in os.listdir(dirpath)
+            if os.path.isfile(os.path.join(dirpath, path))
+        ]
 
 
 def list_directories(dirpath: str = ".") -> list[str]:
-    dirpath = dirpath or "."
-    return [
-        path
-        for path in os.listdir(dirpath)
-        if os.path.isdir(os.path.join(dirpath, path))
-    ]
+    dirpath = os.path.realpath(dirpath or ".")
+    with spin_context(f"Listing directories in {dirpath}"):
+        return [
+            path
+            for path in os.listdir(dirpath)
+            if os.path.isdir(os.path.join(dirpath, path))
+        ]
 
 
 def shell(args: str) -> str:
     # Use shell to be able to use pipe.
     # args is string because we use shell.
-    result = subprocess.run(args, capture_output=True, text=True, shell=True)
-    if result.stderr:
-        raise RuntimeError(result.stderr)
-    return result.stdout
+    with spin_context(f"Executing '{args}'"):
+        result = subprocess.run(
+            args, capture_output=True, text=True, shell=True
+        )
+        if result.stderr:
+            raise RuntimeError(result.stderr)
+        return result.stdout
 
 
 def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
+    with spin_context(f"Editing {path}"):
+        return _edit_file(path, old_str, new_str)
+
+
+def _edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
     if old_str == new_str:
         raise ValueError("new_str must be different from old_str")
 
@@ -232,7 +244,9 @@ def code_search(
 
     args.append(path or ".")
 
-    return shell(" ".join(args))
+    cmd = " ".join(args)
+    with spin_context(f"Searching code with '{cmd}'"):
+        return shell(cmd)
 
 
 class ToolManager:
