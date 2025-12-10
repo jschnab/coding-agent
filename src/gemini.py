@@ -5,6 +5,7 @@ from typing import Any
 from google import genai
 
 from .log import get_logger
+from .spinner import spin
 from .terminal import (
     print_blue,
     print_red,
@@ -82,7 +83,7 @@ class FunctionCallsQueue:
                 self._set.add(call_hash)
                 self._deque.append(call)
             else:
-                print(f"Duplicate call: {call}")
+                logger.info(f"Duplicate call: {call}")
 
     def pop(self):
         call = self._deque.popleft()
@@ -110,7 +111,7 @@ class GeminiAgent:
                 ),
             ],
         )
-        self._chat = self._client.chats.create(
+        self._chat = self._client.aio.chats.create(
             model=GEMINI_25_PRO,
             config=self._config,
         )
@@ -256,7 +257,10 @@ class GeminiAgent:
         }
 
         self._current_state = self._states.START
-        self._current_action = lambda: self._events.KICKOFF
+        self._current_action = self._kickoff
+
+    async def _kickoff(self) -> Enum:
+        return self._events.KICKOFF
 
     def _calls_from_response(
         self,
@@ -283,19 +287,21 @@ class GeminiAgent:
                             print_blue("Agent: ", end="")
                             printed_id = True
                         print_blue(part.text)
+        print()
 
-    def send_message(self, msg: str) -> Any:
+    @spin("Processing request")
+    async def send_message(self, msg: str) -> Any:
         if self._user_actions_context:
             actions = "\n".join(self._user_actions_context)
             context = f"User actions: {actions}\nEnd of user actions.\n"
             msg = context + msg
             self._user_actions_context = []
         logger.info(f"Sending message: {msg}")
-        return self._chat.send_message(msg)
+        return await self._chat.send_message(msg)
 
-    def start(self) -> None:
+    async def start(self) -> None:
         while self._current_state != self._states.END:
-            event = self._current_action()
+            event = await self._current_action()
             try:
                 self._current_state, self._current_action = self._transitions[
                     self._current_state
@@ -307,7 +313,7 @@ class GeminiAgent:
                 )
                 raise
 
-    def _main_menu(self) -> Enum:
+    async def _main_menu(self) -> Enum:
         if self._tools.files_have_edits:
             while True:
                 print(
@@ -325,7 +331,7 @@ class GeminiAgent:
         else:
             return self._events.PROMPT_AGENT
 
-    def _prompt_agent(self) -> Enum:
+    async def _prompt_agent(self) -> Enum:
         print("\n\033[93mYou (press <Enter> twice to finish): ", end="")
         input_lines = []
         for _ in range(100):
@@ -340,15 +346,13 @@ class GeminiAgent:
                 return self._events.USER_EXITED
         else:
             reset_terminal_color()
-            print("\nMax input size reached (100 lines)")
-
-        print()
+            print("\nMax input size reached (100 lines)\n")
 
         if input_lines == []:
             return self._events.PROMPT_AGENT
 
         user_msg = "\n".join(input_lines)
-        response = self.send_message(f"User message: {user_msg}")
+        response = await self.send_message(f"User message: {user_msg}")
         logger.info(f"API response: {response}")
         self.print_agent_response(response)
         self._calls_queue.extend(self._calls_from_response(response))
@@ -358,11 +362,11 @@ class GeminiAgent:
         else:
             return self._events.HAS_FUNCTION_CALLS
 
-    def _use_tool(self) -> Enum:
+    async def _use_tool(self) -> Enum:
         while not self._calls_queue.empty:
             call = self._calls_queue.pop()
             result = self._tools.call_tool(call.name, call.args)
-            response = self.send_message(
+            response = await self.send_message(
                 f"Called tool '{result['tool']}'. "
                 f"Result: {result['result']}. "
                 f"Error: {result['error']}."
@@ -373,7 +377,7 @@ class GeminiAgent:
 
         return self._events.FINISHED_USING_TOOL
 
-    def _file_edits_menu(self) -> Enum:
+    async def _file_edits_menu(self) -> Enum:
         if not self._tools.files_have_edits:
             return self._events.NO_EDITS
         while True:
@@ -394,19 +398,19 @@ class GeminiAgent:
             elif choice in ("5", "five"):
                 return self._events.GO_TO_MAIN_MENU
 
-    def _show_file_edits(self) -> Enum:
+    async def _show_file_edits(self) -> Enum:
         self._tools.print_all_file_diffs()
         return self._events.FINISHED_SHOWING_FILE_EDITS
 
-    def _confirm_edits_all(self) -> Enum:
+    async def _confirm_edits_all(self) -> Enum:
         self._tools.confirm_all_file_edits()
         return self._events.FINISHED_CONFIRMING_FILE_EDITS
 
-    def _revert_edits_all(self) -> Enum:
+    async def _revert_edits_all(self) -> Enum:
         self._user_actions_context.append(self._tools.revert_all_file_edits())
         return self._events.FINISHED_REVERTING_FILE_EDITS
 
-    def _review_edits_file_by_file(self) -> Enum:
+    async def _review_edits_file_by_file(self) -> Enum:
         if not self._tools.files_have_edits:
             return self._events.NO_EDITS
         while True:
