@@ -95,6 +95,10 @@ class FunctionCallsQueue:
     def empty(self) -> bool:
         return len(self._set) == 0
 
+    def discard(self):
+        self._deque = deque()
+        self._set = set()
+
 
 class GeminiAgent:
     def __init__(self) -> None:
@@ -284,9 +288,9 @@ class GeminiAgent:
                 for part in candidate.content.parts:
                     if part.text is not None:
                         if not printed_id:
-                            print_blue("Agent: ", end="")
+                            print("Agent: ", end="")
                             printed_id = True
-                        print_blue(part.text)
+                        print(part.text)
 
         # Add a blank line of the agent responded
         if printed_id:
@@ -369,6 +373,9 @@ class GeminiAgent:
         while not self._calls_queue.empty:
             call = self._calls_queue.pop()
             result = self._tools.call_tool(call.name, call.args)
+            if result["error"] == "aborted":
+                self._calls_queue.discard()
+                break
             response = await self.send_message(
                 f"Called tool '{result['tool']}'. "
                 f"Result: {result['result']}. "

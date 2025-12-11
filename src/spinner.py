@@ -20,10 +20,12 @@ class Spinner:
         reset_terminal_color()
         while self._running:
             frame = next(self.spinner)
-            sys.stdout.write(f"\r{frame} {self.message}")
+            sys.stdout.write(f"\r\033[94m{frame} {self.message}\033[0m")
             sys.stdout.flush()
             time.sleep(self.delay)
-        sys.stdout.write(f"\r\033[32m✔\033[0m {self.message}\n\n")
+        sys.stdout.write(
+            f"\r\033[32m✔\033[0m \033[94m{self.message}\033[0m\n\n"
+        )
         sys.stdout.flush()
 
     def start(self):
