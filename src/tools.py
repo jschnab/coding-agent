@@ -194,7 +194,10 @@ def read_text_file(path: str) -> str:
 
 def list_files(dirpath: str = ".") -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
-    with spin_context(f"Listing files in {dirpath}"):
+    msg = f"Listing files in {dirpath}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return [
             path
             for path in os.listdir(dirpath)
@@ -204,7 +207,10 @@ def list_files(dirpath: str = ".") -> list[str]:
 
 def list_directories(dirpath: str = ".") -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
-    with spin_context(f"Listing directories in {dirpath}"):
+    msg = f"Listing directories in {dirpath}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return [
             path
             for path in os.listdir(dirpath)
@@ -215,7 +221,10 @@ def list_directories(dirpath: str = ".") -> list[str]:
 def shell(args: str) -> str:
     # Use shell to be able to use pipe.
     # args is string because we use shell.
-    with spin_context(f"Executing '{args}'"):
+    msg = f"Executing '{args}'"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         result = subprocess.run(
             args, capture_output=True, text=True, shell=True
         )
@@ -225,7 +234,10 @@ def shell(args: str) -> str:
 
 
 def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
-    with spin_context(f"Editing {path}"):
+    msg = f"Editing {path}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return _edit_file(path, old_str, new_str)
 
 
