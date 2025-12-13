@@ -115,7 +115,7 @@ class GeminiAgent:
             ],
         )
         self._chat = self._client.aio.chats.create(
-            model=GEMINI_25_PRO,
+            model=GEMINI_25_FLASH,
             config=self._config,
         )
         self._calls_queue = FunctionCallsQueue()
@@ -375,11 +375,22 @@ class GeminiAgent:
             if result["error"] == "aborted":
                 self._calls_queue.discard()
                 break
-            response = await self.send_message(
-                f"Called tool '{result['tool']}'. "
-                f"Result: {result['result']}. "
-                f"Error: {result['error']}."
-            )
+            if isinstance(result["result"], bytes):
+                msg = [
+                    f"Called tool '{result['tool']}'. "
+                    f"Error: {result['error']}.",
+                    genai.types.Part.from_bytes(
+                        data=result["result"],
+                        mime_type=result["mime_type"],
+                    ),
+                ]
+            else:
+                msg = [
+                    f"Called tool '{result['tool']}'. "
+                    f"Result: {result['result']}. "
+                    f"Error: {result['error']}."
+                ]
+            response = await self.send_message(msg)
             logger.info(f"API response: {response}")
             self.print_agent_response(response)
             self._calls_queue.extend(self._calls_from_response(response))
