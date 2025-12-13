@@ -5,6 +5,7 @@ from typing import Optional
 from .file_tracker import FileTracker
 from .log import get_logger
 from .spinner import spin_context
+from .terminal import print_red, reset_terminal_color
 
 logger = get_logger(__name__)
 
@@ -157,15 +158,45 @@ FUNCTION_DECLARATIONS = [
 ]
 
 
+def confirm(msg) -> bool:
+    while True:
+        print(f"\033[94m{msg}? yes/no:\033[0m\033[93m ", end="")
+        choice = input()
+        if choice.lower() in ("y", "yes"):
+            ret = True
+            break
+        elif choice.lower() in ("n", "no"):
+            ret = False
+            break
+        else:
+            if choice == "":
+                print_red("Empty input")
+            else:
+                print_red(f"Bad input: {choice}")
+    reset_terminal_color()
+    print()
+    return ret
+
+
+class AbortToolUseError(Exception):
+    pass
+
+
 def read_text_file(path: str) -> str:
-    with spin_context(f"Reading {path}"):
+    msg = f"Reading {path}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         with open(path) as fi:
             return fi.read()
 
 
 def list_files(dirpath: str = ".") -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
-    with spin_context(f"Listing files in {dirpath}"):
+    msg = f"Listing files in {dirpath}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return [
             path
             for path in os.listdir(dirpath)
@@ -175,7 +206,10 @@ def list_files(dirpath: str = ".") -> list[str]:
 
 def list_directories(dirpath: str = ".") -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
-    with spin_context(f"Listing directories in {dirpath}"):
+    msg = f"Listing directories in {dirpath}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return [
             path
             for path in os.listdir(dirpath)
@@ -186,7 +220,10 @@ def list_directories(dirpath: str = ".") -> list[str]:
 def shell(args: str) -> str:
     # Use shell to be able to use pipe.
     # args is string because we use shell.
-    with spin_context(f"Executing '{args}'"):
+    msg = f"Executing '{args}'"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         result = subprocess.run(
             args, capture_output=True, text=True, shell=True
         )
@@ -196,7 +233,10 @@ def shell(args: str) -> str:
 
 
 def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
-    with spin_context(f"Editing {path}"):
+    msg = f"Editing {path}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
         return _edit_file(path, old_str, new_str)
 
 
@@ -277,12 +317,12 @@ class ToolManager:
             result = self._tool_map[name](**args)
         except KeyError:
             error = f"Function '{name}' is not supported"
+        except AbortToolUseError:
+            error = "aborted"
         except Exception as err:
             error = str(err)
         logger.info(f"Result: {result}\nError: {error}")
         return {"tool": name, "result": result, "error": error}
-
-        return self._tool_map[name](**args)
 
     def get_tool_definitions(self) -> dict:
         return self._function_declarations
