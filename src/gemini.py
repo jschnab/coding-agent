@@ -7,7 +7,6 @@ from google import genai
 from .log import get_logger
 from .spinner import spin
 from .terminal import (
-    print_blue,
     print_red,
     reset_terminal_color,
 )

@@ -11,9 +11,7 @@ with open(os.path.join(HERE, "requirements.txt")) as fi:
 setup(
     name="coda",
     packages=["src"],
-    entry_points={
-        "console_scripts": ["coda=src.chat:main"]
-    },
+    entry_points={"console_scripts": ["coda=src.chat:main"]},
     version=__VERSION__,
     description="My own coding agent",
     url="https://github.com/jschnab/coding-agent",

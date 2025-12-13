@@ -1,12 +1,11 @@
 import os
 import subprocess
-import sys
 from typing import Optional
 
 from .file_tracker import FileTracker
 from .log import get_logger
 from .spinner import spin_context
-from .terminal import print_blue, print_red, reset_terminal_color
+from .terminal import print_red, reset_terminal_color
 
 logger = get_logger(__name__)
 
