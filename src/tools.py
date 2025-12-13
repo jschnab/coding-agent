@@ -28,17 +28,18 @@ FUNCTION_DECLARATIONS = [
         },
     },
     {
-        "name": "read_image_file",
+        "name": "read_binary_file",
         "description": (
-            "Reads image file contents. Use this when you want to examine and "
-            "image."
+            "Reads binary file contents. Use this when you want to read and "
+            "interpret the contents of binary files such as image and PDF "
+            "files."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path of the image.",
+                    "description": "Path of the file.",
                 },
             },
             "required": ["path"],
@@ -208,8 +209,8 @@ def read_text_file(path: str) -> str:
             return fi.read()
 
 
-def read_image_file(path: str) -> bytes:
-    msg = f"Reading image {path}"
+def read_binary_file(path: str) -> bytes:
+    msg = f"Reading {path}"
     if not confirm(msg):
         raise AbortToolUseError()
     with spin_context(msg):
@@ -217,12 +218,28 @@ def read_image_file(path: str) -> bytes:
             return fi.read()
 
 
-def image_mime_type(path: str) -> str:
+def get_mime_type(path: str) -> str:
     _, ext = os.path.splitext(path)
     ext_mime_map = {
-        "jpg": "jpeg",
+        "apng": "image/apng",
+        "avif": "image/avif",
+        "bmp": "image/bmp",
+        "cur": "image/x-icon",
+        "gif": "image/gif",
+        "ico": "image/x-icon",
+        "jfif": "image/jpeg",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "pdf": "application/pdf",
+        "pjp": "image/jpeg",
+        "pjpeg": "image/jpeg",
+        "png": "image/png",
+        "svg": "image/svg+xml",
+        "tif": "image/tiff",
+        "tiff": "image/tiff",
+        "webp": "image/webp",
     }
-    return f"image/{ext_mime_map.get(ext[1:], ext[1:])}"
+    return ext_mime_map.get(ext[1:], "application/octet-stream")
 
 
 def list_files(dirpath: str = ".") -> list[str]:
@@ -327,7 +344,7 @@ class ToolManager:
     def __init__(self) -> None:
         self._tool_map = {
             "read_text_file": read_text_file,
-            "read_image_file": read_image_file,
+            "read_binary_file": read_binary_file,
             "list_files": list_files,
             "list_directories": list_directories,
             "shell": shell,
@@ -350,8 +367,8 @@ class ToolManager:
                 except Exception as err:
                     logger.error(f"Error tracking file {path}: {str(err)}")
                     raise
-            elif name == "read_image_file":
-                mime_type = image_mime_type(args["path"])
+            elif name == "read_binary_file":
+                mime_type = get_mime_type(args["path"])
             result = self._tool_map[name](**args)
         except KeyError:
             error = f"Function '{name}' is not supported"
