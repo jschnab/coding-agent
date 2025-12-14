@@ -336,8 +336,16 @@ def code_search(
     args.append(path or ".")
 
     cmd = " ".join(args)
-    with spin_context(f"Searching code with '{cmd}'"):
-        return shell(cmd)
+    msg = f"Searching code with {cmd}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, shell=True
+        )
+        if result.stderr:
+            raise RuntimeError(result.stderr)
+        return result.stdout
 
 
 class ToolManager:
