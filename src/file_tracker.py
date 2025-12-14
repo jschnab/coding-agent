@@ -95,6 +95,8 @@ class FileTracker:
                     print(line, end="")
             else:
                 print(line, end="")
+        else:
+            return
 
         # Only one blank line before next block of text.
         if not line.endswith("\n"):

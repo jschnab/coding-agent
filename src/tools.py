@@ -13,7 +13,7 @@ FUNCTION_DECLARATIONS = [
     {
         "name": "read_text_file",
         "description": (
-            "Reads as text file contents. Use this when you want to see file "
+            "Reads text file contents. Use this when you want to see file "
             "contents. Do no use to read a directory."
         ),
         "parameters": {
@@ -22,6 +22,24 @@ FUNCTION_DECLARATIONS = [
                 "path": {
                     "type": "string",
                     "description": "Path of the file to read.",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "read_binary_file",
+        "description": (
+            "Reads binary file contents. Use this when you want to read and "
+            "interpret the contents of binary files such as image and PDF "
+            "files."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path of the file.",
                 },
             },
             "required": ["path"],
@@ -191,6 +209,39 @@ def read_text_file(path: str) -> str:
             return fi.read()
 
 
+def read_binary_file(path: str) -> bytes:
+    msg = f"Reading {path}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
+        with open(path, "rb") as fi:
+            return fi.read()
+
+
+def get_mime_type(path: str) -> str:
+    _, ext = os.path.splitext(path)
+    ext_mime_map = {
+        "apng": "image/apng",
+        "avif": "image/avif",
+        "bmp": "image/bmp",
+        "cur": "image/x-icon",
+        "gif": "image/gif",
+        "ico": "image/x-icon",
+        "jfif": "image/jpeg",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "pdf": "application/pdf",
+        "pjp": "image/jpeg",
+        "pjpeg": "image/jpeg",
+        "png": "image/png",
+        "svg": "image/svg+xml",
+        "tif": "image/tiff",
+        "tiff": "image/tiff",
+        "webp": "image/webp",
+    }
+    return ext_mime_map.get(ext[1:], "application/octet-stream")
+
+
 def list_files(dirpath: str = ".") -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
     msg = f"Listing files in {dirpath}"
@@ -285,14 +336,23 @@ def code_search(
     args.append(path or ".")
 
     cmd = " ".join(args)
-    with spin_context(f"Searching code with '{cmd}'"):
-        return shell(cmd)
+    msg = f"Searching code with {cmd}"
+    if not confirm(msg):
+        raise AbortToolUseError()
+    with spin_context(msg):
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, shell=True
+        )
+        if result.stderr:
+            raise RuntimeError(result.stderr)
+        return result.stdout
 
 
 class ToolManager:
     def __init__(self) -> None:
         self._tool_map = {
             "read_text_file": read_text_file,
+            "read_binary_file": read_binary_file,
             "list_files": list_files,
             "list_directories": list_directories,
             "shell": shell,
@@ -306,6 +366,7 @@ class ToolManager:
         result = None
         error = None
         logger.info(f"Calling {name} with {args}")
+        mime_type = None
         try:
             if name == "edit_file":
                 path = args["path"]
@@ -314,6 +375,8 @@ class ToolManager:
                 except Exception as err:
                     logger.error(f"Error tracking file {path}: {str(err)}")
                     raise
+            elif name == "read_binary_file":
+                mime_type = get_mime_type(args["path"])
             result = self._tool_map[name](**args)
         except KeyError:
             error = f"Function '{name}' is not supported"
@@ -322,7 +385,12 @@ class ToolManager:
         except Exception as err:
             error = str(err)
         logger.info(f"Result: {result}\nError: {error}")
-        return {"tool": name, "result": result, "error": error}
+        return {
+            "tool": name,
+            "result": result,
+            "error": error,
+            "mime_type": mime_type,
+        }
 
     def get_tool_definitions(self) -> dict:
         return self._function_declarations
