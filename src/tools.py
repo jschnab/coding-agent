@@ -200,7 +200,7 @@ class AbortToolUseError(Exception):
     pass
 
 
-def read_text_file(path: str) -> str:
+def read_text_file(path: str, **kwargs) -> str:
     msg = f"Reading {path}"
     if not confirm(msg):
         raise AbortToolUseError()
@@ -209,7 +209,7 @@ def read_text_file(path: str) -> str:
             return fi.read()
 
 
-def read_binary_file(path: str) -> bytes:
+def read_binary_file(path: str, **kwargs) -> bytes:
     msg = f"Reading {path}"
     if not confirm(msg):
         raise AbortToolUseError()
@@ -242,7 +242,7 @@ def get_mime_type(path: str) -> str:
     return ext_mime_map.get(ext[1:], "application/octet-stream")
 
 
-def list_files(dirpath: str = ".") -> list[str]:
+def list_files(dirpath: str = ".", **kwargs) -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
     msg = f"Listing files in {dirpath}"
     if not confirm(msg):
@@ -255,7 +255,7 @@ def list_files(dirpath: str = ".") -> list[str]:
         ]
 
 
-def list_directories(dirpath: str = ".") -> list[str]:
+def list_directories(dirpath: str = ".", **kwargs) -> list[str]:
     dirpath = os.path.realpath(dirpath or ".")
     msg = f"Listing directories in {dirpath}"
     if not confirm(msg):
@@ -268,7 +268,7 @@ def list_directories(dirpath: str = ".") -> list[str]:
         ]
 
 
-def shell(args: str) -> str:
+def shell(args: str, **kwargs) -> str:
     # Use shell to be able to use pipe.
     # args is string because we use shell.
     msg = f"Executing '{args}'"
@@ -283,12 +283,21 @@ def shell(args: str) -> str:
         return result.stdout
 
 
-def edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
+def edit_file(
+    path: str, old_str: str, new_str: str, **kwargs
+) -> Optional[str]:
     msg = f"Editing {path}"
     if not confirm(msg):
         raise AbortToolUseError()
     with spin_context(msg):
-        return _edit_file(path, old_str, new_str)
+        tracker = kwargs["__file_tracker"]
+        is_new = tracker.track_file(path)
+        try:
+            return _edit_file(path, old_str, new_str)
+        except Exception as err:
+            if is_new:
+                tracker.untrack_file(path)
+            raise
 
 
 def _edit_file(path: str, old_str: str, new_str: str) -> Optional[str]:
@@ -322,6 +331,7 @@ def code_search(
     path: str = ".",
     file_type: str = "",
     case_sensitive: bool = False,
+    **kwargs,
 ) -> tuple[str, str]:
     args = ["rg", "--line-number", "--with-filename", "--color=never"]
 
@@ -368,16 +378,12 @@ class ToolManager:
         logger.info(f"Calling {name} with {args}")
         mime_type = None
         try:
-            if name == "edit_file":
-                path = args["path"]
-                try:
-                    self._file_tracker.track_file(path)
-                except Exception as err:
-                    logger.error(f"Error tracking file {path}: {str(err)}")
-                    raise
-            elif name == "read_binary_file":
+            if name == "read_binary_file":
                 mime_type = get_mime_type(args["path"])
-            result = self._tool_map[name](**args)
+            result = self._tool_map[name](
+                **args,
+                __file_tracker=self._file_tracker,
+            )
         except KeyError:
             error = f"Function '{name}' is not supported"
         except AbortToolUseError:
