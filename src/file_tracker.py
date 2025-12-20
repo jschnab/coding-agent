@@ -28,8 +28,10 @@ class FileTracker:
     def has_edits(self) -> bool:
         return self._files != {}
 
-    def track_file(self, path: str) -> None:
+    def track_file(self, path: str) -> bool:
         """
+        Returns True if the file is new to the tracker else False.
+
         When a file is edited for the first time:
         * Make a backup copy of the file (file name is hidden and has a random
           suffix)
@@ -46,7 +48,7 @@ class FileTracker:
 
         # File already tracked, we're done.
         if abs_path in self._files:
-            return
+            return False
 
         dir_path, file_path = os.path.split(abs_path)
 
@@ -59,6 +61,7 @@ class FileTracker:
             backup_path = None
 
         self._files[abs_path] = {"backup_file_path": backup_path}
+        return True
 
     def file_diff(self, file_path) -> Generator[str, str, None]:
         from_file = self._files[file_path]["backup_file_path"]
@@ -102,6 +105,19 @@ class FileTracker:
         if not line.endswith("\n"):
             print()
 
+    def untrack_file(self, path: str) -> None:
+        abs_path = os.path.abspath(path)
+        tracked = self._files.get(abs_path)
+        if tracked is None:
+            return
+
+        if (backup := tracked["backup_file_path"]) is not None:
+            if backup is not None:
+                logger.info(f"Deleting backup file {backup}")
+                os.remove(backup)
+
+        del self._files[abs_path]
+
     def print_all_file_diffs(self) -> None:
         if not self.has_edits:
             print("\nThere are no file edits")
@@ -109,12 +125,7 @@ class FileTracker:
             self.print_file_diffs(path)
 
     def confirm_file(self, path: str) -> None:
-        backup = self._files[path]["backup_file_path"]
-        if backup is not None:
-            logger.info(f"Deleting backup file {backup}")
-
-            os.remove(backup)
-        del self._files[path]
+        self.untrack_file(path)
         print(f"\nConfirmed edits to {path}")
 
     def confirm_all(self) -> None:
