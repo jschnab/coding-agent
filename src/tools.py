@@ -14,7 +14,8 @@ FUNCTION_DECLARATIONS = [
         "name": "read_text_file",
         "description": (
             "Reads text file contents. Use this when you want to see file "
-            "contents. Do no use to read a directory."
+            "contents. Do no use to read a directory. The output is a Python "
+            "string that provides the raw text content of the file."
         ),
         "parameters": {
             "type": "object",
@@ -109,8 +110,10 @@ FUNCTION_DECLARATIONS = [
         "description": (
             "Makes edits to a text file. Replaces 'old_str' with 'new_str' in "
             "the given file. 'old_str' and 'new_str' MUST be different from "
-            "each other. If the file specified by 'path' does not exist, it "
-            "will be created."
+            "each other. 'old_str' MUST MATCH ONE AND ONLY ONE string in the "
+            "file. If the file specified by 'path' does not exist, it will"
+            "will be created. 'old_str' and 'new_str' must be Python string "
+            "that provide the raw text content of the file."
         ),
         "parameters": {
             "type": "object",
@@ -294,7 +297,7 @@ def edit_file(
         is_new = tracker.track_file(path)
         try:
             return _edit_file(path, old_str, new_str)
-        except Exception as err:
+        except Exception:
             if is_new:
                 tracker.untrack_file(path)
             raise

@@ -9,9 +9,9 @@ with open(os.path.join(HERE, "requirements.txt")) as fi:
     REQUIREMENTS = fi.readlines()
 
 setup(
-    name="coda",
+    name="codi",
     packages=["src"],
-    entry_points={"console_scripts": ["coda=src.chat:main"]},
+    entry_points={"console_scripts": ["codi=src.chat:main"]},
     version=__VERSION__,
     description="My own coding agent",
     url="https://github.com/jschnab/coding-agent",
@@ -27,6 +27,6 @@ setup(
         "Programming Language :: Python :: 3.9",
     ],
     python_requires=">=3.9",
-    keywords="coding agent llm",
+    keywords="coding agent assistant",
     install_requires=REQUIREMENTS,
 )
