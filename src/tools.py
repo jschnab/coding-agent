@@ -242,7 +242,7 @@ def get_mime_type(path: str) -> str:
         "tiff": "image/tiff",
         "webp": "image/webp",
     }
-    return ext_mime_map.get(ext[1:], "application/octet-stream")
+    return ext_mime_map.get(ext[1:], "text/plain")
 
 
 def list_files(dirpath: str = ".", **kwargs) -> list[str]:

@@ -7,7 +7,9 @@ from google import genai
 from .log import get_logger
 from .spinner import spin
 from .terminal import (
+    print_blue,
     print_red,
+    print_yellow,
     reset_terminal_color,
 )
 from .tools import ToolManager
@@ -16,6 +18,7 @@ from .utils import local_platform
 logger = get_logger(__name__)
 
 GEMINI_3 = "gemini-3-pro-preview"
+GEMINI_3_FLASH = "gemini-3-flash-preview"
 GEMINI_25_PRO = "gemini-2.5-pro"
 GEMINI_25_FLASH = "gemini-2.5-flash"
 
@@ -126,7 +129,7 @@ class GeminiAgent:
             ],
         )
         self._chat = self._client.aio.chats.create(
-            model=GEMINI_25_FLASH,
+            model=GEMINI_3_FLASH,
             config=self._config,
         )
         self._calls_queue = FunctionCallsQueue()
@@ -141,7 +144,6 @@ class GeminiAgent:
             [
                 ("START", 1),
                 ("END", 2),
-                ("MAIN_MENU", 3),
                 ("PROMPT_AGENT", 4),
                 ("USE_TOOL", 5),
                 ("FILE_EDITS_MENU", 6),
@@ -163,7 +165,6 @@ class GeminiAgent:
                 ("FINISHED_USING_TOOL", 6),
                 ("SHOW_FILE_EDITS", 7),
                 ("FINISHED_SHOWING_FILE_EDITS", 8),
-                ("GO_TO_MAIN_MENU", 9),
                 ("USER_EXITED", 10),
                 ("CONFIRM_EDITS_ALL", 11),
                 ("REVERT_EDITS_ALL", 12),
@@ -172,24 +173,15 @@ class GeminiAgent:
                 ("NO_EDITS", 15),
                 ("REVIEW_EDITS_FILE_BY_FILE", 16),
                 ("GO_TO_FILE_EDITS_MENU", 17),
+                ("PRINT_HELP", 18),
             ],
         )
 
         self._transitions = {
             self._states.START: {
                 self._events.KICKOFF: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
-                ),
-            },
-            self._states.MAIN_MENU: {
-                self._events.PROMPT_AGENT: (
                     self._states.PROMPT_AGENT,
                     self._prompt_agent,
-                ),
-                self._events.MANAGE_FILE_EDITS: (
-                    self._states.FILE_EDITS_MENU,
-                    self._file_edits_menu,
                 ),
             },
             self._states.PROMPT_AGENT: {
@@ -202,15 +194,23 @@ class GeminiAgent:
                     self._use_tool,
                 ),
                 self._events.NO_FUNCTION_CALLS: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
                 ),
                 self._events.USER_EXITED: (self._states.END, None),
+                self._events.PRINT_HELP: (
+                    self._states.PROMPT_AGENT,
+                    self._print_help,
+                ),
+                self._events.MANAGE_FILE_EDITS: (
+                    self._states.FILE_EDITS_MENU,
+                    self._file_edits_menu,
+                ),
             },
             self._states.USE_TOOL: {
                 self._events.FINISHED_USING_TOOL: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
                 ),
             },
             self._states.FILE_EDITS_MENU: {
@@ -230,13 +230,9 @@ class GeminiAgent:
                     self._states.REVIEW_EDITS_FILE_BY_FILE,
                     self._review_edits_file_by_file,
                 ),
-                self._events.GO_TO_MAIN_MENU: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
-                ),
                 self._events.NO_EDITS: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
                 ),
             },
             self._states.SHOW_FILE_EDITS: {
@@ -259,8 +255,8 @@ class GeminiAgent:
             },
             self._states.REVIEW_EDITS_FILE_BY_FILE: {
                 self._events.NO_EDITS: (
-                    self._states.MAIN_MENU,
-                    self._main_menu,
+                    self._states.PROMPT_AGENT,
+                    self._prompt_agent,
                 ),
                 self._events.GO_TO_FILE_EDITS_MENU: (
                     self._states.FILE_EDITS_MENU,
@@ -331,27 +327,14 @@ class GeminiAgent:
                     f"event {event}"
                 )
                 raise
-
-    async def _main_menu(self) -> Enum:
-        if self._tools.files_have_edits:
-            while True:
-                print(
-                    "\nChoose next steps:\n"
-                    "1. Prompt agent\n"
-                    "2. Manage file edits"
-                )
-                choice = input().strip().lower()
-                if choice in ("1", "one"):
-                    return self._events.PROMPT_AGENT
-                elif choice in ("2", "two"):
-                    return self._events.MANAGE_FILE_EDITS
-                else:
-                    print_red("Type 1 or 2")
-        else:
-            return self._events.PROMPT_AGENT
+        reset_terminal_color()
 
     async def _prompt_agent(self) -> Enum:
-        print("\n\033[93mYou (press <Enter> twice to finish): ", end="")
+        print_yellow(
+            "You (press <Enter> twice to finish): ",
+            end="",
+            reset_color=False,
+        )
         input_lines = []
         for _ in range(100):
             try:
@@ -370,6 +353,9 @@ class GeminiAgent:
         if input_lines == []:
             return self._events.PROMPT_AGENT
 
+        if input_lines[0].startswith("/"):
+            return await self._parse_slash_command(input_lines[0])
+
         user_msg = "\n".join(input_lines)
         response = await self.send_message(
             f"<user_task>{user_msg}</user_task>"
@@ -382,6 +368,26 @@ class GeminiAgent:
             return self._events.NO_FUNCTION_CALLS
         else:
             return self._events.HAS_FUNCTION_CALLS
+
+    async def _parse_slash_command(self, cmd: str) -> Enum:
+        # Skip initial slash
+        cmd = cmd[1:].lower()
+        if cmd.startswith("help"):
+            return self._events.PRINT_HELP
+        if cmd.startswith("diff"):
+            return self._events.MANAGE_FILE_EDITS
+        if cmd.startswith("exit") or cmd.startswith("quit"):
+            return self._events.USER_EXITED
+
+    async def _print_help(self) -> Enum:
+        print_yellow(
+            "Available commands:\n"
+            "  /diff: Manage file edits (see diffs, confirm, etc.\n"
+            "  /exit: Exit the agent\n"
+            "  /help: Print this message.\n"
+            "  /quit: Same as /exit\n"
+        )
+        return self._events.PROMPT_AGENT
 
     async def _use_tool(self) -> Enum:
         while not self._calls_queue.empty:
@@ -414,12 +420,15 @@ class GeminiAgent:
 
     async def _file_edits_menu(self) -> Enum:
         if not self._tools.files_have_edits:
+            reset_terminal_color()
+            print("There a no file edits\n")
             return self._events.NO_EDITS
         while True:
+            reset_terminal_color()
             print(
                 "\nChoose action:\n1. Show edits\n2. Confirm edits (all)\n"
                 "3. Revert edits (all)\n4. Review edits (file by file)\n"
-                "5. Main menu"
+                "5. Exit"
             )
             choice = input().strip().lower()
             if choice in ("1", "one"):
@@ -431,7 +440,7 @@ class GeminiAgent:
             elif choice in ("4", "four"):
                 return self._events.REVIEW_EDITS_FILE_BY_FILE
             elif choice in ("5", "five"):
-                return self._events.GO_TO_MAIN_MENU
+                return self._events.PROMPT_AGENT
 
     async def _show_file_edits(self) -> Enum:
         self._tools.print_all_file_diffs()
